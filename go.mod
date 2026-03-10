@@ -1,9 +1,10 @@
 module github.com/complytime/gemara-content-service
 
-go 1.24.13
+go 1.24.0
+
+toolchain go1.24.5
 
 require (
-	github.com/complytime/complybeacon/compass v0.0.0-20260302122211-ebe183326ec1
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/getkin/kin-openapi v0.133.0
 	github.com/gin-contrib/requestid v1.0.5

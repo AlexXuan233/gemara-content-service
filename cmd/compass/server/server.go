@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"log/slog"
 	"net"
@@ -42,10 +43,19 @@ func NewGinServer(service *compass.Service, port string, config *Config) *http.S
 		}
 
 		jwtConfig := httpmw.JWTAuthConfig{
-			ExpectedAudience: expectedAudience,
-			AllowedSubjects:  config.JWTAuth.AllowedSubjects,
+			IssuerURL:           config.JWTAuth.IssuerURL,
+			KubernetesServiceIP: config.JWTAuth.KubernetesServiceIP,
+			ExpectedAudience:    expectedAudience,
+			AllowedSubjects:     config.JWTAuth.AllowedSubjects,
 		}
-		r.Use(httpmw.JWTAuthMiddleware(jwtConfig))
+
+		jwtAuth, err := httpmw.NewJWTAuth(context.Background(), jwtConfig)
+		if err != nil {
+			slog.Error("failed to initialize JWT authentication", "error", err)
+			os.Exit(1)
+		}
+
+		r.Use(jwtAuth.Middleware())
 		slog.Info("jwt authentication enabled", "audience", expectedAudience)
 	}
 

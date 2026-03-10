@@ -17,12 +17,22 @@ import (
 
 // JWTAuthConfig holds the configuration for JWT authentication
 type JWTAuthConfig struct {
-	ExpectedAudience string
-	AllowedSubjects  []string
+	IssuerURL           string // OIDC issuer URL (defaults to "https://kubernetes.default.svc" if empty)
+	KubernetesServiceIP string // Kubernetes API IP for DNS bypass (falls back to env vars if empty)
+	ExpectedAudience    string
+	AllowedSubjects     []string
 }
 
-// JWTAuthMiddleware creates a Gin middleware that validates bound service account tokens
-func JWTAuthMiddleware(config JWTAuthConfig) gin.HandlerFunc {
+// JWTAuth holds the initialized OIDC verifier and configuration for JWT authentication
+type JWTAuth struct {
+	verifier        *oidc.IDTokenVerifier
+	httpClient      *http.Client
+	allowedSubjects []string
+}
+
+// NewJWTAuth initializes a new JWTAuth instance with the given configuration.
+// This performs all OIDC provider setup and returns an error if initialization fails.
+func NewJWTAuth(ctx context.Context, config JWTAuthConfig) (*JWTAuth, error) {
 	// 1. Get in-cluster Kubernetes config
 	k8sConfig, err := rest.InClusterConfig()
 	if err != nil {
@@ -33,9 +43,9 @@ func JWTAuthMiddleware(config JWTAuthConfig) gin.HandlerFunc {
 	}
 
 	// 2. Determine the Kubernetes API IP for DNS bypass
-	kubernetesServiceIP := os.Getenv("KUBERNETES_SERVICE_IP")
+	kubernetesServiceIP := config.KubernetesServiceIP
 	if kubernetesServiceIP == "" {
-		kubernetesServiceIP = os.Getenv("KUBERNETES_SERVICE_HOST")
+		kubernetesServiceIP = os.Getenv("KUBERNETES_SERVICE_IP")
 	}
 	dnsBypassEnabled := kubernetesServiceIP != ""
 
@@ -63,7 +73,10 @@ func JWTAuthMiddleware(config JWTAuthConfig) gin.HandlerFunc {
 		httpClient = http.DefaultClient
 	}
 
-	issuerURL := "https://kubernetes.default.svc"
+	issuerURL := config.IssuerURL
+	if issuerURL == "" {
+		issuerURL = "https://kubernetes.default.svc"
+	}
 
 	// Startup context used strictly for initial provider setup
 	startupCtx := oidc.ClientContext(context.Background(), httpClient)
@@ -86,12 +99,7 @@ func JWTAuthMiddleware(config JWTAuthConfig) gin.HandlerFunc {
 	}
 
 	if err != nil {
-		slog.Error("fatal: failed to create OIDC provider after retries", "error", err)
-		return func(c *gin.Context) {
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-				"error": "JWT authentication initialization failed",
-			})
-		}
+		return nil, fmt.Errorf("failed to create OIDC provider after retries: %w", err)
 	}
 
 	verifierConfig := &oidc.Config{
@@ -105,12 +113,20 @@ func JWTAuthMiddleware(config JWTAuthConfig) gin.HandlerFunc {
 
 	verifier := provider.Verifier(verifierConfig)
 
-	slog.Info("JWT authentication middleware initialized",
+	slog.Info("JWT authentication initialized",
 		"issuer", issuerURL,
 		"audience", config.ExpectedAudience,
 		"dns_bypass", dnsBypassEnabled)
 
-	// Middleware execution
+	return &JWTAuth{
+		verifier:        verifier,
+		httpClient:      httpClient,
+		allowedSubjects: config.AllowedSubjects,
+	}, nil
+}
+
+// Middleware returns a Gin middleware handler that validates JWT tokens
+func (j *JWTAuth) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -128,13 +144,13 @@ func JWTAuthMiddleware(config JWTAuthConfig) gin.HandlerFunc {
 		rawToken := parts[1]
 
 		// Create a request-scoped context containing the custom HTTP Client
-		reqCtx := oidc.ClientContext(c.Request.Context(), httpClient)
+		reqCtx := oidc.ClientContext(c.Request.Context(), j.httpClient)
 
 		// Verify the token validation(cryptographic signature and expiration)
-		idToken, err := verifier.Verify(reqCtx, rawToken)
+		idToken, err := j.verifier.Verify(reqCtx, rawToken)
 		if err != nil {
 			slog.Warn("token verification failed", "error", err)
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("invalid token: %v", err)})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
 		}
 
@@ -147,16 +163,16 @@ func JWTAuthMiddleware(config JWTAuthConfig) gin.HandlerFunc {
 		}
 
 		// Verify the caller's identity (Subject/Service Account)
-		if len(config.AllowedSubjects) > 0 {
+		if len(j.allowedSubjects) > 0 {
 			subject, ok := claims["sub"].(string)
 			if !ok {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "subject claim missing"})
 				return
 			}
 
-			if err := validateSubject(subject, config.AllowedSubjects); err != nil {
+			if err := validateSubject(subject, j.allowedSubjects); err != nil {
 				slog.Warn("subject validation failed", "error", err, "subject", subject)
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("subject validation failed: %v", err)})
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 				return
 			}
 		}
@@ -166,6 +182,21 @@ func JWTAuthMiddleware(config JWTAuthConfig) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// JWTAuthMiddleware creates a Gin middleware that validates bound service account tokens.
+// Deprecated: Use NewJWTAuth followed by Middleware() for better error handling and testability.
+func JWTAuthMiddleware(config JWTAuthConfig) gin.HandlerFunc {
+	auth, err := NewJWTAuth(context.Background(), config)
+	if err != nil {
+		slog.Error("fatal: failed to initialize JWT authentication", "error", err)
+		return func(c *gin.Context) {
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error": "JWT authentication initialization failed",
+			})
+		}
+	}
+	return auth.Middleware()
 }
 
 func validateSubject(subject string, allowedSubjects []string) error {

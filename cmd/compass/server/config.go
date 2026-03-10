@@ -46,9 +46,11 @@ type Config struct {
 }
 
 type JWTAuthConfig struct {
-	Enabled          bool     `json:"enabled" yaml:"enabled"`
-	ExpectedAudience string   `json:"expectedAudience" yaml:"expectedAudience"`
-	AllowedSubjects  []string `json:"allowedSubjects" yaml:"allowedSubjects"`
+	Enabled             bool     `json:"enabled" yaml:"enabled"`
+	IssuerURL           string   `json:"issuerUrl" yaml:"issuerUrl"`
+	KubernetesServiceIP string   `json:"kubernetesServiceIp" yaml:"kubernetesServiceIp"`
+	ExpectedAudience    string   `json:"expectedAudience" yaml:"expectedAudience"`
+	AllowedSubjects     []string `json:"allowedSubjects" yaml:"allowedSubjects"`
 }
 
 type CertConfig struct {
