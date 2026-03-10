@@ -1,6 +1,7 @@
 package oci
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -181,10 +182,14 @@ func (r *Registry) BlobPath(digest string) (string, error) {
 }
 
 // parseDigest splits a digest string like "sha256:abcdef..." into its
-// algorithm and hex components. Returns false if the format is invalid.
-func parseDigest(digest string) (algo, hex string, ok bool) {
+// algorithm and hex components. Returns false if the format is invalid
+// or the hex portion contains non-hexadecimal characters.
+func parseDigest(digest string) (algo, hexStr string, ok bool) {
 	parts := strings.SplitN(digest, ":", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	if _, err := hex.DecodeString(parts[1]); err != nil {
 		return "", "", false
 	}
 	return parts[0], parts[1], true

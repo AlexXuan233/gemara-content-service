@@ -1,6 +1,7 @@
 package oci
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -36,7 +37,7 @@ func writeOCIError(c *gin.Context, status int, code, message string) {
 
 // writeNameUnknown writes a 404 NAME_UNKNOWN error response.
 func writeNameUnknown(c *gin.Context, repo string) {
-	writeOCIError(c, http.StatusNotFound, CodeNameUnknown, "repository name not known to registry")
+	writeOCIError(c, http.StatusNotFound, CodeNameUnknown, fmt.Sprintf("repository %q not known to registry", repo))
 }
 
 // writeManifestUnknown writes a 404 MANIFEST_UNKNOWN error response.

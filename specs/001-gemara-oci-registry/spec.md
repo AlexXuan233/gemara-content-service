@@ -226,9 +226,12 @@ client side.
   BBolt.
 - **No pagination** is needed for catalog or tag listing in this phase;
   registries are expected to have a small number of repositories and tags.
-- **No HEAD** requests are needed in this phase; GET-only is sufficient.
-- Each manifest contains a **single layer** pointing to one Gemara YAML blob.
-  Multi-layer manifests are out of scope for this phase.
+- **HEAD** requests are supported for manifests to allow clients (e.g.
+  `complyctl`) to check manifest existence and retrieve the digest without
+  downloading the full body.
+- Manifests may contain **multiple layers**, each pointing to a Gemara YAML
+  blob with its own media type (e.g. a policy artifact with both catalog and
+  policy layers).
 - The OCI manifest **config** descriptor will use a minimal empty config blob
   (or `application/vnd.oci.empty.v1+json`); no Gemara-specific config metadata
   is needed in this phase.

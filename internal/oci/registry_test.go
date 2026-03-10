@@ -205,3 +205,10 @@ func TestBlobPath_InvalidDigest(t *testing.T) {
 	_, err := reg.BlobPath("invalid")
 	assert.ErrorIs(t, err, ErrBlobNotFound)
 }
+
+func TestBlobPath_PathTraversal(t *testing.T) {
+	reg := newTestRegistry(t, nil, nil, nil)
+
+	_, err := reg.BlobPath("sha256:../../../../../../etc/passwd")
+	assert.ErrorIs(t, err, ErrBlobNotFound)
+}
